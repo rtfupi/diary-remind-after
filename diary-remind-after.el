@@ -49,6 +49,8 @@
 ;;           (concat " -> (" (em-diary-print ddate) ")" diary-entry))
 ;;          ((eq place 'after)
 ;;           (concat " <= (" (em-diary-print ddate) ")" diary-entry))
+;;          ((eq place 'last)
+;;           (concat " <# (" (em-diary-print ddate) ")" diary-entry))
 ;;          (t
 ;;           (concat " !!             " diary-entry)))))
 
@@ -100,80 +102,85 @@ AFTER       : the absolute date of the upper bound of the current
          (A (calendar-absolute-from-gregorian (list m d yc))) ; юбилей в текущем году
          (b (- A before)) ; нижняя граница в этом году
          (a (+ A after)) ; верхняя граница в этом году
+         (pra 'after)
          Aa v fl)
 
 
-      (when (and (>= s bfirst)
-                 (or (not exact) (<= s afirst)))
+    (when (and (>= s bfirst)
+               (or (not exact) (<= s afirst)))
 
-        (setq v (calendar-gregorian-from-absolute b))
+      (setq v (calendar-gregorian-from-absolute b))
+      (when (/= (calendar-extract-year v) yc)
+        ;; год нижней границы не равен текущему.
+
+        ;;   new year                        new year
+        ;; --+---|---+---+-------------------+---|---+---+--
+        ;;   b       A   a                   b       A   a
+        ;; зациклим
+        (setf (nth 2 v) yc)
+        (setq b (calendar-absolute-from-gregorian v))
+        (setq fl t))
+
+      (unless fl
+        (setq v (calendar-gregorian-from-absolute a))
         (when (/= (calendar-extract-year v) yc)
-          ;; год нижней границы не равен текущему.
+          ;; год верхней границы не равен текущему.
 
-          ;;   new year                        new year
-          ;; --+---|---+---+-------------------+---|---+---+--
-          ;;   b       A   a                   b       A   a
+          ;;         new year                          new year
+          ;; --+----+---|---+--------------------+----+---|---+-
+          ;;   b    A       a                    b   A       a
           ;; зациклим
           (setf (nth 2 v) yc)
-          (setq b (calendar-absolute-from-gregorian v))
-          (setq fl t))
+          (setq a (calendar-absolute-from-gregorian v))
+          (setq fl t)))
 
-        (unless fl
-          (setq v (calendar-gregorian-from-absolute a))
-          (when (/= (calendar-extract-year v) yc)
-            ;; год верхней границы не равен текущему.
+      (if fl
+          (cond
+           ((and (>= s b) (<= A a))
+            ;; --+---|---+---+-------------------+-.-|---+---+--
+            ;;   b       A   a                   b s     A   a
+            (setq Aa (calendar-absolute-from-gregorian (list m d (1+ yc))))
+            (list 1 'before t Aa (- Aa before) (+ Aa after)))
 
-            ;;         new year                          new year
-            ;; --+----+---|---+--------------------+----+---|---+-
-            ;;   b    A       a                    b   A       a
-            ;; зациклим
-            (setf (nth 2 v) yc)
-            (setq a (calendar-absolute-from-gregorian v))
-            (setq fl t)))
+           ((and (<= s a) (<= A a))
+            (if (< s A)
+                ;; --+---|-.-+---+-------------------+---|---+---+--
+                ;;   b     s A   a                   b       A   a
+                (list 0 'before t A (- A before) (+ A after))
+              ;; --+--|---+-.-+-------------------+---|---+---+--
+              ;;   b      A s a                   b       A   a
+              (when (= s a) (setq pra 'last))
+              (list 0 pra t A (- A before) (+ A after))))
 
-        (if fl
-            (cond
-             ((and (>= s b) (<= A a))
-              ;; --+---|---+---+-------------------+-.-|---+---+--
-              ;;   b       A   a                   b s     A   a
-              (setq Aa (calendar-absolute-from-gregorian (list m d (1+ yc))))
-              (list 1 'before t Aa (- Aa before) (+ Aa after)))
+           ((and (<= s a) (>= A b))
+            ;; --+---+---|-.-+--------------------+---+---|---+-
+            ;;   b   A     s a                    b   A       a
+            (setq Aa (calendar-absolute-from-gregorian (list m d (1- yc))))
+            (when (= s a) (setq pra 'last))
+            (list -1 pra t Aa (- Aa before) (+ Aa after)))
 
-             ((and (<= s a) (<= A a))
-              (if (< s A)
-                  ;; --+---|-.-+---+-------------------+---|---+---+--
-                  ;;   b     s A   a                   b       A   a
-                  (list 0 'before t A (- A before) (+ A after))
-                ;; --+--|---+-.-+-------------------+---|---+---+--
-                ;;   b      A s a                   b       A   a
-                (list 0 'after t A (- A before) (+ A after))))
+           ((and (>= s b) (>= A b))
+            (if (< s A)
+                ;; --+---+---|---+--------------------+-.-+---|---+-
+                ;;   b   A       a                    b s A       a
+                (list 0 'before t A (- A before) (+ A after))
+              ;; --+---+---|---+---------------------+---+-.-|---+-
+              ;;   b   A       a                     b   A s     a
+              (when (= s a) (setq pra 'last))
+              (list 0 pra t A (- A before) (+ A after))))
+           (t
+            (list 0 nil nil)))
 
-             ((and (<= s a) (>= A b))
-              ;; --+---+---|-.-+--------------------+---+---|---+-
-              ;;   b   A     s a                    b   A       a
-              (setq Aa (calendar-absolute-from-gregorian (list m d (1- yc))))
-              (list -1 'after t Aa (- Aa before) (+ Aa after)))
-
-             ((and (>= s b) (>= A b))
-              (if (< s A)
-                  ;; --+---+---|---+--------------------+-.-+---|---+-
-                  ;;   b   A       a                    b s A       a
-                  (list 0 'before t A (- A before) (+ A after))
-                ;; --+---+---|---+---------------------+---+-.-|---+-
-                ;;   b   A       a                     b   A s     a
-                (list 0 'after t A (- A before) (+ A after))))
-             (t
-              (list 0 nil nil)))
-
-          ;; new year                      new year
-          ;; ---|--------+---+---+------------|-
-          ;;             b   A   a
-          (if (and (>= s b) (<= s a))
-              (if (and (>= s b) (< s A ))
-                  (list 0 'before t A b a)
-                (list 0 'after t A b a))
-            (list 0 nil nil))
-          ))))
+        ;; new year                      new year
+        ;; ---|--------+---+---+------------|-
+        ;;             b   A   a
+        (if (and (>= s b) (<= s a))
+            (if (and (>= s b) (< s A ))
+                (list 0 'before t A b a)
+              (when (= s a) (setq pra 'last))
+              (list 0 pra t A b a))
+          (list 0 nil nil))
+        ))))
 
 
 
@@ -195,7 +202,7 @@ calendar.
 
 The order of the input parameters changes according to
 `calendar-date-style' (e.g. to DAY MONTH YEAR in the European style)."
-;;!!! date - external variable !!!
+  ;;!!! date - external variable !!!
 
   (unless before (setq before 0))
   (unless after (setq after 0))
@@ -207,8 +214,8 @@ The order of the input parameters changes according to
          (yy (calendar-extract-year ddate))
          (diff (if yy (- y yy) 100))
          (yy (if yy yy (1- y)))  ; это для того, что если год указан, то юбилей
-                                 ; рассматривается только со следующего от указанного года,
-                                 ; а если год не указан, то рассматривается уже в этом году.
+                                        ; рассматривается только со следующего от указанного года,
+                                        ; а если год не указан, то рассматривается уже в этом году.
          r place)
 
     ;; високосный год
@@ -254,8 +261,8 @@ The order of the input parameters changes according to
   ""
   (when (or
          (and (= month 2)
-            (or (and (calendar-leap-year-p year) (> day 29))
-                (> day 28)))
+              (or (and (calendar-leap-year-p year) (> day 29))
+                  (> day 28)))
          (= day 31))
     (calendar-last-day-of-month mm)))
 
@@ -467,7 +474,7 @@ calendar."
       (and (or (listp day) (eq day t)
                (listp month) (eq month t)
                (listp year) (eq year t))
-               (setq before nil after nil))
+           (setq before nil after nil))
 
       (if (calendar-date-equal (list mm dd yy) date)
           (let ((diary-entry entry))
